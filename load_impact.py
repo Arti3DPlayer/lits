@@ -2,6 +2,7 @@
 #!/usr/bin/python
 
 import os
+import urllib
 import loadimpact
 
 from lxml import etree
@@ -40,58 +41,57 @@ class LoadImpactAssigment(object):
 			self.config_test = etree_to_dict(root_hashtree.find("hashTree").find("hashTree").find("ConfigTestElement"))
 			self.sample_proxies = [etree_to_dict(sample_proxy) for sample_proxy in root_hashtree.find("hashTree").find("hashTree").findall("hashTree")[1].findall("HTTPSamplerProxy")]
 		
-		self.load_scenario()
+		self.load_scenarios()
+		self.load_config()
 
 
-	def load_scenario(self):
-		
-		load_script = """
-			local response = http.get("http://example.com')
-			log.info("Load time: "..response.total_load_time.."s")
-			client.sleep(5)
-			"""
-		user_scenario = self.client.create_user_scenario({
-		    'name': "My user scenario",
-		    'load_script': load_script
+	def load_scenarios(self):
+		domain = self.config_test['ConfigTestElement'][get_index(self.config_test['ConfigTestElement'], "@name", "HTTPSampler.domain")]['text']
+		for script in self.sample_proxies:
+			path = script['HTTPSamplerProxy'][get_index(script['HTTPSamplerProxy'], "@name", "HTTPSampler.path")]['text']
+			method = script['HTTPSamplerProxy'][get_index(script['HTTPSamplerProxy'], "@name", "HTTPSampler.method")]['text']
+			for collection_prop in script['HTTPSamplerProxy'][get_index(script['HTTPSamplerProxy'], "@name", "HTTPsampler.Arguments")]['elementProp']:
+				query = dict()
+				for element_prop in collection_prop['collectionProp']:
+					q_name = element_prop['elementProp'][get_index(element_prop['elementProp'], "@name", "Argument.name")]['text']
+					q_value = element_prop['elementProp'][get_index(element_prop['elementProp'], "@name", "Argument.value")]['text']
+					query[q_name] = q_value
+
+
+				query = urllib.urlencode(query)
+				if query:
+					query = "?%s" % query
+				try:
+					self.client.create_user_scenario({
+					 	'name': "%s%s%s" % (domain, path, query),
+					 	'load_script': 'http.request_batch({{"%s", "%s%s%s"}})' % (method, domain, path, query)
+					})
+				except loadimpact.exceptions.ConflictError:
+					print 'Url http.request_batch({{"%s", "%s%s"}) is already exsist.' % (method, path, query)
+
+	def load_config(self):
+		name = self.testplan['@testname']
+		domain = self.config_test['ConfigTestElement'][get_index(self.config_test['ConfigTestElement'], "@name", "HTTPSampler.domain")]['text']
+		tracks = list()
+		scenario_count = len(self.client.list_user_scenarios())
+		for scenario in self.client.list_user_scenarios():
+			tracks.append({
+					"clips": [{
+		                "user_scenario_id": int(scenario.id), 'percent': 100/scenario_count
+		            },],
+		            "loadzone": loadimpact.LoadZone.AMAZON_US_ASHBURN,
+				})
+		num_threads = int(self.threadgroup['ThreadGroup'][get_index(self.threadgroup['ThreadGroup'], "@name", "ThreadGroup.num_threads")]['text'])
+		ramp_time = int(self.threadgroup['ThreadGroup'][get_index(self.threadgroup['ThreadGroup'], "@name", "ThreadGroup.ramp_time")]['text'])
+		config = self.client.create_test_config({
+		    'name': name,
+		    'url': 'http://%s/' % domain,
+		    'config': {
+		        "load_schedule": [{"users": num_threads, "duration": ramp_time}],
+		        "tracks": tracks,
+		        "user_type": "sbu"
+		    }
 		})
 
 
 lia = LoadImpactAssigment(api_token='731de9cc2b6c5e6a69312dc8b201c6a0edfed098dce04727a822c1c8b7adeb18')
-
-# file_path = os.path.join(os.path.dirname(__file__), 'apache-jmeter.jmx')
-# xml = etree.parse(file_path)
-# for root_hashtree in xml.getroot().getchildren():
-# 	testplan = etree_to_dict(root_hashtree.find("TestPlan"))
-# 	threadgroup = etree_to_dict(root_hashtree.find("hashTree").find("ThreadGroup"))
-# 	config_test = etree_to_dict(root_hashtree.find("hashTree").find("hashTree").find("ConfigTestElement"))
-	
-# 	sample_proxies = [etree_to_dict(sample_proxy) for sample_proxy in root_hashtree.find("hashTree").find("hashTree").findall("hashTree")[1].findall("HTTPSamplerProxy")]
-# 	print sample_proxy
-# 	#print config_test['ConfigTestElement'][get_index(config_test['ConfigTestElement'], "@name", "HTTPSampler.domain")]
-
-
-	
-
-
-# 	# if len(hashtree_child):
-# 	# 	threadgroup = dict()
-# 	# 	config_test = dict()
-# 	# 	sample_proxy = dict()
-# 	# 	for tag in hashtree_child.find("ThreadGroup"):
-# 	# 		key = tag.get("name").replace("ThreadGroup.", "")
-# 	# 		threadgroup[key] = tag.text
-
-# 	# 	config_test_elem = hashtree_child.find("hashTree").find("ConfigTestElement")
-# 	# 	for tag in config_test_elem:
-# 	# 		key = tag.get("name").replace("HTTPSampler.", "")
-# 	# 		config_test[key] = tag.text
-
-# 	# 	sample_proxy_elem = hashtree_child.find("hashTree").findall("hashTree")[1].find("HTTPSamplerProxy")
-# 	# 	for tag in sample_proxy_elem:
-# 	# 		key = tag.get("name").replace("HTTPSampler.", "")
-# 	# 		sample_proxy[key] = tag.text
-
-# 	#for hashtree_child in root_hashtree.find("hashTree"):
-# 	#	print hashtree_child
-# 		#for threadgroup in xml_hashtree_child.find("ThreadGroup"):
-# 		#	print threadgroup
